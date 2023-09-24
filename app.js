@@ -1,152 +1,91 @@
 /********** Libraries **********/
-var request = require('request');
-var cron = require('cron').CronJob;
-var cheerio = require('cheerio');
-var async = require('async');
-var moment = require('moment');
-var redis = require('redis');
-var fs = require('fs');
+const request = require('request');
+const cron = require('cron').CronJob;
+const cheerio = require('cheerio');
+const async = require('async');
+const moment = require('moment');
+const fs = require('fs').promises; // Utilizando o módulo fs promisificado
 /*******************************/
 
-/********** Redis configuration **********/
-var redisClient = redis.createClient();
-redisClient.setMaxListeners(0);
-redisClient.select(9);
-/*****************************************/
-
 /********** Constants & Variables **********/
-var imageUrlTimeout = 3600;
-
-// Picture tweets from channels below will be downloaded
-var usernames = ['TMCPoldaMetro', 'RadioElshinta', 'lewatmana', 'tvOneNews', 'detikcom', 'Metro_TV'];
+const imageUrlTimeout = 3600;
+const usernames = ['ukazuhira'];
 /*******************************************/
 
-var job = new cron({
-	// Change how often you want to scrap for images. The default is 3 minutes
+// Função para criar diretório se não existir
+async function createDirectoryIfNotExists(path) {
+  try {
+    await fs.mkdir(path, { recursive: true });
+  } catch (error) {
+    console.error('Erro ao criar diretório:', error);
+  }
+}
+
+async function downloadImage(currUsername, imageUrl) {
+  try {
+    await createDirectoryIfNotExists(`./images/${currUsername}`);
+
+    const now = moment();
+    const fileName = `./images/${currUsername}/${now.unix()}${imageUrl.split('/').pop().split(':')[0]}`;
+
+    const response = await request(imageUrl);
+    if (response.statusCode === 200) {
+      console.log('Downloaded new image to', fileName);
+
+      // Cria o arquivo no sistema de arquivos
+      await fs.writeFile(fileName, response.body);
+    } else {
+      console.error('Erro ao baixar a imagem:', response.statusCode);
+    }
+  } catch (error) {
+    console.error('Erro:', error);
+  }
+}
+
+async function scrapeTwitterProfile(currUsername) {
+  const profileUrl = `https://twitter.com/${currUsername}`;
+
+  try {
+    const response = await request.get({
+      url: profileUrl,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    const body = response.body;
+
+    const $ = cheerio.load(body);
+
+    for (const currTimeline of $('.twitter-timeline-link')) {
+      const imageUrl = $(currTimeline).attr('data-resolved-url-large');
+      if (imageUrl) {
+        await downloadImage(currUsername, imageUrl);
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao obter a página do perfil:', error);
+  }
+}
+
+// Função principal
+async function downloadImages() {
+  console.log('\n######################################################################');
+  console.log('Download images started at', new Date());
+  console.log('######################################################################');
+
+  for (const currUsername of usernames) {
+    await scrapeTwitterProfile(currUsername);
+  }
+
+  console.log('######################################################################');
+  console.log('Download images ended at', new Date());
+  console.log('######################################################################');
+}
+
+// Configuração do cron job
+const job = new cron({
   cronTime: '0 */3 * * * *',
-  onTick: function() {
-		console.log('\n######################################################################');
-		console.log('Download images started at ' + new Date());
-		console.log('######################################################################');
-	  	
-  	// Each username to scrap
-		async.eachSeries(usernames,
-		  function (currUsername, callback) {
-		  	// Get the Twitter profile page
-		  	var profileUrl = 'https://twitter.com/' + currUsername;
-				request.get(profileUrl, function (error, response, body) {
-				  if(!error && body) {
-				    var $ = cheerio.load(body);
-
-	          // Each timeline link
-				    async.eachSeries($('.twitter-timeline-link'),
-						  function (currTimeline, callback) {
-						  	var imageUrl = $(currTimeline).attr('data-resolved-url-large');
-						  	if(imageUrl) {
-						  		async.series([
-						  			// Check images dir, if doesn't exist, create
-						  			function (callback) {
-									    fs.exists('./images', function (exists) {
-										    if(exists) {
-										    	callback(null);
-										    }
-										    else {
-										      fs.mkdir('./images', function() {
-										      	callback(null);
-										      });
-										    }
-										  });
-									  },
-
-						  			// Check images/username dir, if doesn't exist create
-									  function (callback) {
-									    fs.exists('./images/' + currUsername, function (exists) {
-										    if(exists) {
-										    	callback(null);
-										    }
-										    else {
-										      fs.mkdir('./images/' + currUsername, function() {
-										      	callback(null);
-										      });
-										    }
-										  });
-									  },
-
-						  			// Check if imageUrl exists on redis
-						  			function (callback) {
-											redisClient.multi()
-												  .get(imageUrl, function (err, result) {})
-												  .expire(imageUrl, imageUrlTimeout)
-												  .exec(function (err, replies) {
-											  if(replies[0]) {
-											    // Image already downloaded. Skip next steps, go to next timeline item
-											    callback(1);
-											  }
-											  else {
-											  	// Next step
-											  	callback(null);
-											  }
-											});
-									  },
-
-									  // Get the file
-									  function (callback) {
-									  	var now = moment();
-									  	var fileName = './images/' + currUsername + '/' + now.unix() + imageUrl.split('/').pop().split(':')[0];
-									  	request(imageUrl, function (error, response, body) {
-											  if (!error && response.statusCode == 200) {
-											  	console.log('Downloaded new image to ' + fileName);
-
-											  	// Save image url into Redis so it won't be redownloaded next time
-											    redisClient.multi()
-														  .set(imageUrl, 1, function (err, result) {})
-														  .expire(imageUrl, imageUrlTimeout)
-														  .exec(function (err, replies) {
-													  callback(null);
-													});
-											  }
-											  else {
-											  	// If download fails skips all, delete partially downloaded file, and go to next timeline item
-											  	fs.unlink(fileName, function (err) {
-													  callback(1);
-													});
-											  }
-											}).pipe(fs.createWriteStream(fileName));
-									  }
-									],
-									function (err, results) {
-										// Next timeline item
-									  callback(null);
-									});
-						  	}
-						  	else {
-						  		// Next timeline it
-						  		callback(null);
-						  	}
-						  },
-						function (err) {
-							// Next username
-						  callback(null);
-						});
-				  }
-				  else {
-				  	// Next username
-				  	callback(null);
-				  }
-				});
-		  },
-		function (err) {
-		  console.log('######################################################################');
-			console.log('Download images ended at ' + new Date());
-			console.log('######################################################################');
-		});
-  },
-  start: true
+  onTick: downloadImages,
+  start: true,
 });
-
-
-
-		
-
-		
-

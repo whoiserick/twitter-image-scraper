@@ -50,23 +50,31 @@ async function scrapeTwitterProfile(currUsername) {
       url: profileUrl,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
+      },
+      followRedirect: false // Adicionando esta opção para desativar o follow de redirecionamentos
     });
 
-    const body = response.body;
+    if (response.statusCode === 200) {
+      const body = response.body;
 
-    const $ = cheerio.load(body);
+      const $ = cheerio.load(body);
 
-    for (const currTimeline of $('.twitter-timeline-link')) {
-      const imageUrl = $(currTimeline).attr('data-resolved-url-large');
-      if (imageUrl) {
-        await downloadImage(currUsername, imageUrl);
+      for (const currTimeline of $('.twitter-timeline-link')) {
+        const imageUrl = $(currTimeline).attr('data-resolved-url-large');
+        if (imageUrl) {
+          await downloadImage(currUsername, imageUrl);
+        }
       }
+    } else if (response.statusCode === 302 || response.statusCode === 301) {
+      console.error(`A página ${profileUrl} foi redirecionada. Verifique a URL.`);
+    } else {
+      console.error(`Erro ao obter a página do perfil. Código de status: ${response.statusCode}`);
     }
   } catch (error) {
     console.error('Erro ao obter a página do perfil:', error);
   }
 }
+
 
 // Função principal
 async function downloadImages() {

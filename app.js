@@ -10,6 +10,7 @@ const fs = require('fs').promises; // Utilizando o módulo fs promisificado
 /********** Constants & Variables **********/
 const imageUrlTimeout = 3600;
 const usernames = ['ukazuhira'];
+const cookie = '776e42c14a5cab3a8093e40a74a4cbf7417ff832'; // Adicione o cookie da sua sessão aqui
 /*******************************************/
 
 // Função para criar diretório se não existir
@@ -28,7 +29,13 @@ async function downloadImage(currUsername, imageUrl) {
     const now = moment();
     const fileName = `./images/${currUsername}/${now.unix()}${imageUrl.split('/').pop().split(':')[0]}`;
 
-    const response = await request(imageUrl);
+    const response = await request(imageUrl, {
+      headers: {
+        'Cookie': cookie,
+        // Adicione outros headers se necessário
+      }
+    });
+
     if (response.statusCode === 200) {
       console.log('Downloaded new image to', fileName);
 
@@ -43,36 +50,48 @@ async function downloadImage(currUsername, imageUrl) {
 }
 
 async function scrapeTwitterProfile(currUsername) {
-  const profileUrl = `https://twitter.com/${currUsername}`;
+  let maxId = null;
+  let totalPages = 0;
 
-  try {
-    const response = await request.get({
-      url: profileUrl,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
-      followRedirect: false // Adicionando esta opção para desativar o follow de redirecionamentos
-    });
+  do {
+    const profileUrl = `https://twitter.com/${currUsername}?max_id=${maxId ? maxId : ''}`;
 
-    if (response.statusCode === 200) {
-      const body = response.body;
+    try {
+      const response = await request.get({
+        url: profileUrl,
+        headers: {
+          'Cookie': cookie,
+          // Adicione outros headers se necessário
+        }
+      });
 
-      const $ = cheerio.load(body);
+      const $ = cheerio.load(response.body);
+
+      let tweetsFound = 0;
 
       for (const currTimeline of $('.twitter-timeline-link')) {
         const imageUrl = $(currTimeline).attr('data-resolved-url-large');
         if (imageUrl) {
           await downloadImage(currUsername, imageUrl);
+          tweetsFound++;
         }
       }
-    } else if (response.statusCode === 302 || response.statusCode === 301) {
-      console.error(`A página ${profileUrl} foi redirecionada. Verifique a URL.`);
-    } else {
-      console.error(`Erro ao obter a página do perfil. Código de status: ${response.statusCode}`);
+
+      totalPages++;
+      console.log(`Página ${totalPages}: ${tweetsFound} imagens encontradas.`);
+
+      // Atualiza maxId para a próxima página
+      const nextMaxId = $('[data-min-position]').attr('data-min-position');
+      if (nextMaxId && nextMaxId !== maxId) {
+        maxId = nextMaxId;
+      } else {
+        break;
+      }
+    } catch (error) {
+      console.error('Erro ao obter a página do perfil:', error);
+      break;
     }
-  } catch (error) {
-    console.error('Erro ao obter a página do perfil:', error);
-  }
+  } while (maxId && totalPages < 10); // Limite de 10 páginas para evitar loops infinitos
 }
 
 

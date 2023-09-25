@@ -32,6 +32,7 @@ async function downloadImage(currUsername, imageUrl) {
     const response = await request(imageUrl, {
       headers: {
         'Cookie': cookie,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         // Adicione outros headers se necessário
       }
     });
@@ -61,7 +62,7 @@ async function scrapeTwitterProfile(currUsername) {
         url: profileUrl,
         headers: {
           'Cookie': cookie,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
           // more Headers if necessary
         }
       });

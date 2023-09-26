@@ -6,16 +6,10 @@ from Twitter but are too lazy to check Twitter website. Use responsibly.
 
 ## How to use
 1. Clone the project
-	```bash
     git clone https://github.com/whoiserick/twitter-image-scraper.git
-  ```
 
 2. Install dependencies
-  ```bash
-  npm install
-  ```
+  npm i
 
 3. Run project
-  ```bash
   node app.js
-  ```
